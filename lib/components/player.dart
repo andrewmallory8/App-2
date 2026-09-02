@@ -40,4 +40,5 @@ class Player extends SpriteComponent {
       onFire(Vector2(position.x, position.y - size.y / 2));
     }
   }
+
 }

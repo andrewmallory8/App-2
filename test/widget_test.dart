@@ -9,6 +9,7 @@ import 'package:app_2/components/laser.dart';
 import 'package:app_2/components/player.dart';
 import 'package:app_2/game_config.dart';
 import 'package:app_2/main.dart';
+import 'package:app_2/main_menu.dart';
 import 'package:app_2/space_invaders_game.dart';
 
 Future<void> pumpGame(WidgetTester tester, SpaceInvadersGame game) async {
@@ -18,6 +19,17 @@ Future<void> pumpGame(WidgetTester tester, SpaceInvadersGame game) async {
     await game.loaded;
     await game.ready();
   });
+  await tester.pump();
+  await tester.pump();
+}
+
+Future<void> pumpPlayingGame(
+  WidgetTester tester,
+  SpaceInvadersGame game,
+) async {
+  await pumpGame(tester, game);
+  game.startGame();
+  await tester.runAsync(game.ready);
   await tester.pump();
   await tester.pump();
 }
@@ -32,6 +44,35 @@ void main() {
     expect(find.byType(SafeArea), findsOneWidget);
     expect(find.byType(GameWidget<SpaceInvadersGame>), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('select level routes from the menu to the game scene', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(
+      const Size(GameConfig.logicalWidth, GameConfig.logicalHeight),
+    );
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final game = SpaceInvadersGame();
+    await pumpGame(tester, game);
+
+    expect(game.currentRouteName, SpaceInvadersGame.menuRoute);
+    expect(game.descendants().whereType<MainMenu>(), hasLength(1));
+    expect(game.world.descendants().whereType<Alien>(), isEmpty);
+
+    await tester.tapAt(
+      const Offset(
+        GameConfig.logicalWidth / 2,
+        GameConfig.logicalHeight * 0.61,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.runAsync(game.ready);
+    await tester.pump();
+
+    expect(game.currentRouteName, SpaceInvadersGame.playRoute);
+    expect(game.descendants().whereType<MainMenu>(), isEmpty);
+    expect(game.world.descendants().whereType<Alien>(), hasLength(15));
   });
 
   testWidgets('loads every sprite asset into the image cache', (tester) async {
@@ -52,7 +93,7 @@ void main() {
   testWidgets('populates the classic formation with 15 aliens', (tester) async {
     final game = SpaceInvadersGame();
 
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
 
     final aliens = game.world.descendants().whereType<Alien>();
     expect(aliens, hasLength(15));
@@ -62,7 +103,7 @@ void main() {
     tester,
   ) async {
     final game = SpaceInvadersGame();
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
     final formation = game.world.firstChild<AlienFormation>()!;
 
     final startingX = formation.position.x;
@@ -83,7 +124,7 @@ void main() {
     tester,
   ) async {
     final game = SpaceInvadersGame();
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
     final player = game.world.firstChild<Player>()!;
 
     player.moveToX(-100);
@@ -104,21 +145,21 @@ void main() {
     );
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final game = SpaceInvadersGame();
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
     final player = game.world.firstChild<Player>()!;
 
     await tester.dragFrom(
       Offset(GameConfig.logicalWidth / 2, player.position.y),
       const Offset(-500, 0),
     );
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(player.position.x, expectedPlayerSafetyMargin + player.size.x / 2);
 
     await tester.dragFrom(
       Offset(GameConfig.logicalWidth / 2, player.position.y),
       const Offset(500, 0),
     );
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(
       player.position.x,
       GameConfig.logicalWidth - expectedPlayerSafetyMargin - player.size.x / 2,
@@ -127,7 +168,7 @@ void main() {
 
   testWidgets('player auto-fire spawns an upward-moving laser', (tester) async {
     final game = SpaceInvadersGame();
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
 
     game.update(GameConfig.autoFireInterval);
     await tester.runAsync(game.ready);
@@ -142,7 +183,7 @@ void main() {
     tester,
   ) async {
     final game = SpaceInvadersGame();
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
     game.update(GameConfig.autoFireInterval);
     await tester.runAsync(game.ready);
     final laser = game.world.descendants().whereType<Laser>().single;
@@ -158,7 +199,7 @@ void main() {
     tester,
   ) async {
     final game = SpaceInvadersGame();
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
     final alien = game.world.descendants().whereType<Alien>().first;
     final laser = Laser(position: alien.absoluteCenter);
     game.world.add(laser);
@@ -175,7 +216,7 @@ void main() {
     tester,
   ) async {
     final game = SpaceInvadersGame();
-    await pumpGame(tester, game);
+    await pumpPlayingGame(tester, game);
     final extraShip = game.world.firstChild<ExtraShip>()!;
 
     final startingX = extraShip.position.x;

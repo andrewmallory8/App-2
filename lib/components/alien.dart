@@ -33,4 +33,8 @@ class Alien extends SpriteComponent {
   }
 
   final AlienVariant variant;
+
+  /// Set the first time this alien is destroyed so score/collisions
+  /// stay idempotent when multiple lasers overlap the same alien.
+  bool destroyed = false;
 }

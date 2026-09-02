@@ -39,4 +39,18 @@ abstract final class GameConfig {
   static const double alienHorizontalMargin = 24;
   static const double alienMarchSpeed = 44;
   static const double alienStepDown = 14;
+
+  // --- Player life / death system ---
+  static const int initialLives = 3;
+  static const double playerDangerLineY = 600;
+  static const double invulnerabilityDuration = 2.0;
+  static const double invulnerabilityFlashInterval = 0.12;
+  static const double hitTelegraphDuration = 1.0;
+
+  // --- Enemy projectiles ---
+  static const double enemyFireInterval = 1.6;
+  static const int maxEnemyProjectiles = 3;
+  static const double enemyLaserWidth = 4;
+  static const double enemyLaserHeight = 14;
+  static const double enemyLaserSpeed = 220;
 }

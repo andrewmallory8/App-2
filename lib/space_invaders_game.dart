@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:flame/components.dart';
@@ -6,9 +7,12 @@ import 'package:flame/game.dart';
 
 import 'components/alien.dart';
 import 'components/alien_formation.dart';
+import 'components/enemy_laser.dart';
 import 'components/extra_ship.dart';
+import 'components/hud.dart';
 import 'components/laser.dart';
 import 'components/player.dart';
+import 'death_screen.dart';
 import 'game_config.dart';
 import 'main_menu.dart';
 
@@ -31,14 +35,42 @@ class SpaceInvadersGame extends FlameGame
   ];
   static const String menuRoute = '/menu';
   static const String playRoute = '/play';
+  static const String deathRoute = '/death';
   static const Color sceneBackgroundColor = Color(0xFF10131A);
 
   late final RouterComponent router;
-  late final Player player;
+  late Player player;
+
+  // --- Testable game state ---
+  int lives = GameConfig.initialLives;
+  int score = 0;
+  bool isGameOver = false;
+
+  double _invulnerabilityTimer = 0;
+  bool _breachLatched = false;
+  double _enemyFireTimer = 0;
+  final Set<Alien> _scoredAliens = {};
+
+  /// Injectable randomness for enemy fire; tests may seed or replace it.
+  Random random = Random();
+
+  /// When false, automatic timed enemy fire is skipped.
+  /// Tests use [forceEnemyShot]/[spawnEnemyProjectile] instead.
+  bool enemyAutoFireEnabled = true;
 
   String get currentRouteName => router.currentRoute.name!;
 
-  bool get _isPlaying => currentRouteName == playRoute;
+  bool get _isPlaying => router.isMounted && currentRouteName == playRoute;
+
+  bool get isInvulnerable => _invulnerabilityTimer > 0;
+  bool get breachLatched => _breachLatched;
+
+  int get enemyProjectileCount {
+    if (!_isPlaying) {
+      return 0;
+    }
+    return world.descendants().whereType<EnemyLaser>().length;
+  }
 
   @override
   Color backgroundColor() => sceneBackgroundColor;
@@ -60,13 +92,36 @@ class SpaceInvadersGame extends FlameGame
           maintainState: false,
         ),
         playRoute: WorldRoute(_buildPlayWorld, maintainState: false),
+        deathRoute: Route(
+          () => DeathScreen(
+            score: score,
+            onRestart: startGame,
+            onMainMenu: goToMenu,
+          ),
+          maintainState: false,
+        ),
       },
     );
     add(router);
   }
 
   void startGame() {
+    _resetSession();
     router.pushReplacementNamed(playRoute);
+  }
+
+  void goToMenu() {
+    router.pushReplacementNamed(menuRoute);
+  }
+
+  void _resetSession() {
+    lives = GameConfig.initialLives;
+    score = 0;
+    isGameOver = false;
+    _invulnerabilityTimer = 0;
+    _breachLatched = false;
+    _enemyFireTimer = 0;
+    _scoredAliens.clear();
   }
 
   World _buildPlayWorld() {
@@ -78,19 +133,211 @@ class SpaceInvadersGame extends FlameGame
       sprite: Sprite(images.fromCache('player.png')),
       onFire: _fireLaser,
     );
+    final hud = Hud()..updateState(lives: lives, score: score);
     return World(
       children: [
         AlienFormation(sprites: alienSprites),
         ExtraShip(sprite: Sprite(images.fromCache('extra.png'))),
         player,
+        hud,
       ],
     );
   }
 
   @override
+  void update(double dt) {
+    super.update(dt);
+    if (!_isPlaying || isGameOver) {
+      return;
+    }
+    if (_invulnerabilityTimer > 0) {
+      _invulnerabilityTimer -= dt;
+      if (_invulnerabilityTimer < 0) {
+        _invulnerabilityTimer = 0;
+      }
+    }
+    _syncPlayerFlash();
+    if (enemyAutoFireEnabled) {
+      _enemyFireTimer += dt;
+      if (_enemyFireTimer >= GameConfig.enemyFireInterval) {
+        _enemyFireTimer -= GameConfig.enemyFireInterval;
+        _maybeFireEnemyShot();
+      }
+    }
+    checkFormationBreach();
+    _updateHud();
+  }
+
+  void _updateHud() {
+    if (!_isPlaying) {
+      return;
+    }
+    final hud = world.firstChild<Hud>();
+    hud?.updateState(lives: lives, score: score);
+  }
+
+  /// Mirror the invulnerability window onto the player's blink state.
+  /// Transition-aware on the player side, so per-frame sync is cheap.
+  void _syncPlayerFlash() {
+    if (!_isPlaying) {
+      return;
+    }
+    try {
+      player.setInvulnerable(_invulnerabilityTimer > 0);
+    } catch (_) {
+      // Player not yet mounted; the next frame will sync.
+    }
+  }
+
+  /// Telegraph the lost life on the HUD hit flash.
+  void _flashHudHit() {
+    if (!_isPlaying) {
+      return;
+    }
+    world.firstChild<Hud>()?.flashHit();
+  }
+
+  // --- Scoring ---
+
+  /// Award points for a destroyed alien exactly once per instance.
+  void onAlienDestroyed(Alien alien) {
+    if (isGameOver) {
+      return;
+    }
+    if (!_scoredAliens.add(alien)) {
+      return;
+    }
+    score += alien.variant.points;
+    _updateHud();
+  }
+
+  // --- Enemy fire ---
+
+  void _maybeFireEnemyShot() {
+    if (!_isPlaying || isGameOver) {
+      return;
+    }
+    final aliens = world.descendants().whereType<Alien>().toList();
+    if (aliens.isEmpty) {
+      return;
+    }
+    if (world.descendants().whereType<EnemyLaser>().length >=
+        GameConfig.maxEnemyProjectiles) {
+      return;
+    }
+    final shooter = aliens[random.nextInt(aliens.length)];
+    spawnEnemyProjectile(shooter.absoluteCenter.clone());
+  }
+
+  /// Deterministic helper: fire from the first alien, bypassing timers.
+  void forceEnemyShot() {
+    if (!_isPlaying || isGameOver) {
+      return;
+    }
+    final aliens = world.descendants().whereType<Alien>().toList();
+    if (aliens.isEmpty) {
+      return;
+    }
+    if (world.descendants().whereType<EnemyLaser>().length >=
+        GameConfig.maxEnemyProjectiles) {
+      return;
+    }
+    spawnEnemyProjectile(aliens.first.absoluteCenter.clone());
+  }
+
+  /// Deterministic helper: spawn an enemy projectile at an exact position.
+  void spawnEnemyProjectile(Vector2 position) {
+    if (!_isPlaying || isGameOver) {
+      return;
+    }
+    world.add(
+      EnemyLaser(
+        position: position.clone(),
+        onHitPlayer: onEnemyProjectileHitPlayer,
+      ),
+    );
+  }
+
+  /// Single entry point for enemy-projectile hits; idempotent per projectile
+  /// via [EnemyLaser.hasHit] plus the invulnerability window.
+  void onEnemyProjectileHitPlayer(EnemyLaser projectile) {
+    if (isGameOver || !_isPlaying) {
+      return;
+    }
+    if (isInvulnerable) {
+      return;
+    }
+    loseLife(projectile: projectile);
+  }
+
+  // --- Lives / breach / death ---
+
+  /// Lose exactly one life. Removes [projectile] when the loss came from
+  /// an enemy shot, resets the player when lives remain, or ends the game.
+  void loseLife({EnemyLaser? projectile}) {
+    if (isGameOver) {
+      return;
+    }
+    projectile?.removeFromParent();
+    lives -= 1;
+    if (lives <= 0) {
+      lives = 0;
+      _updateHud();
+      _handleGameOver();
+      return;
+    }
+    if (_isPlaying) {
+      try {
+        player.resetToStart();
+        player.setInvulnerable(true);
+      } catch (_) {
+        // Player not yet mounted (e.g. very early reset); ignore.
+      }
+    }
+    _invulnerabilityTimer = GameConfig.invulnerabilityDuration;
+    _flashHudHit();
+    _updateHud();
+  }
+
+  /// Detect when the lowest part of the formation reaches the danger line.
+  /// Latched so a formation lingering beyond the line costs only one life.
+  void checkFormationBreach() {
+    if (isGameOver || !_isPlaying || _breachLatched) {
+      return;
+    }
+    final formation = world.firstChild<AlienFormation>();
+    if (formation == null) {
+      return;
+    }
+    final bottom = formation.position.y + formation.size.y;
+    if (bottom >= GameConfig.playerDangerLineY) {
+      _breachLatched = true;
+      loseLife();
+    }
+  }
+
+  void _handleGameOver() {
+    if (isGameOver) {
+      return;
+    }
+    isGameOver = true;
+    router.pushReplacementNamed(deathRoute);
+  }
+
+  /// Test helper: expire the post-hit invulnerability window.
+  void clearInvulnerability() {
+    _invulnerabilityTimer = 0;
+    try {
+      player.setInvulnerable(false);
+    } catch (_) {
+      // Player not yet mounted; nothing to unsync.
+    }
+  }
+
+  @override
   void onDragStart(DragStartEvent event) {
     super.onDragStart(event);
-    if (!_isPlaying) {
+    if (!_isPlaying || isGameOver) {
       return;
     }
     event.handled = true;
@@ -100,7 +347,7 @@ class SpaceInvadersGame extends FlameGame
   @override
   void onDragUpdate(DragUpdateEvent event) {
     super.onDragUpdate(event);
-    if (!_isPlaying) {
+    if (!_isPlaying || isGameOver) {
       return;
     }
     event.handled = true;
@@ -112,6 +359,9 @@ class SpaceInvadersGame extends FlameGame
   }
 
   void _fireLaser(Vector2 origin) {
-    world.add(Laser(position: origin));
+    if (!_isPlaying || isGameOver) {
+      return;
+    }
+    world.add(Laser(position: origin, onAlienDestroyed: onAlienDestroyed));
   }
 }

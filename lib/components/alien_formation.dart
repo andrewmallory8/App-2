@@ -20,16 +20,16 @@ class AlienFormation extends PositionComponent {
       ) {
     for (final (row, variant) in AlienVariant.values.indexed) {
       for (var column = 0; column < GameConfig.alienColumns; column++) {
-        add(
-          Alien(
-            variant: variant,
-            sprite: sprites[variant]!,
-            position: Vector2(
-              column * (GameConfig.alienWidth + GameConfig.alienColumnGap),
-              row * (GameConfig.alienHeight + GameConfig.alienRowGap),
-            ),
+        final alien = Alien(
+          variant: variant,
+          sprite: sprites[variant]!,
+          position: Vector2(
+            column * (GameConfig.alienWidth + GameConfig.alienColumnGap),
+            row * (GameConfig.alienHeight + GameConfig.alienRowGap),
           ),
         );
+        _roster.add(alien);
+        add(alien);
       }
     }
   }
@@ -37,8 +37,16 @@ class AlienFormation extends PositionComponent {
   double _direction = 1;
   final double speedMultiplier;
 
+  /// Every alien spawned for this formation, including divers currently
+  /// reparented into the world. [children] alone is not enough once
+  /// divers detach, so the living count tracks this roster instead.
+  final List<Alien> _roster = [];
+
+  /// All aliens spawned for this formation, living or destroyed.
+  List<Alien> get roster => List.unmodifiable(_roster);
+
   int get livingAlienCount =>
-      children.whereType<Alien>().where((alien) => !alien.destroyed).length;
+      _roster.where((alien) => !alien.destroyed).length;
 
   int get totalAlienCount =>
       AlienVariant.values.length * GameConfig.alienColumns;

@@ -55,4 +55,14 @@ abstract final class GameConfig {
   static const double enemyLaserWidth = 4;
   static const double enemyLaserHeight = 14;
   static const double enemyLaserSpeed = 220;
+
+  // --- Dive attacks (enemies break away, zig-zag down, fire, return) ---
+  static const double diveAttackInterval = 4.5;
+  static const int maxSimultaneousDivers = 2;
+  static const double diveFallSpeed = 170;
+  static const double diveZigZagAmplitude = 36;
+  static const double diveZigZagFrequency = 3.5;
+  static const double diveFireInterval = 1.1;
+  static const double diveReturnSpeed = 240;
+  static const double diveReturnSnapDistance = 10;
 }

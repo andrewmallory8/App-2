@@ -58,6 +58,7 @@ class SpaceInvadersGame extends FlameGame
   double _invulnerabilityTimer = 0;
   bool _breachLatched = false;
   double _enemyFireTimer = 0;
+  double _diveTimer = 0;
   final Set<Alien> _scoredAliens = {};
 
   /// Injectable randomness for enemy fire; tests may seed or replace it.
@@ -66,6 +67,10 @@ class SpaceInvadersGame extends FlameGame
   /// When false, automatic timed enemy fire is skipped.
   /// Tests use [forceEnemyShot]/[spawnEnemyProjectile] instead.
   bool enemyAutoFireEnabled = true;
+
+  /// When false, automatic timed dive attacks are skipped.
+  /// Tests use [forceDiveAttack] instead.
+  bool diveAttackEnabled = true;
 
   String get currentRouteName => router.currentRoute.name!;
 
@@ -79,6 +84,23 @@ class SpaceInvadersGame extends FlameGame
       return 0;
     }
     return world.descendants().whereType<EnemyLaser>().length;
+  }
+
+  /// Aliens currently diving or returning (detached from the formation).
+  int get activeDiverCount {
+    if (!_isPlaying) {
+      return 0;
+    }
+    return world
+        .descendants()
+        .whereType<Alien>()
+        .where(
+          (alien) =>
+              !alien.destroyed &&
+              !alien.isRemoved &&
+              alien.flightState != AlienFlightState.inFormation,
+        )
+        .length;
   }
 
   @override
@@ -132,6 +154,7 @@ class SpaceInvadersGame extends FlameGame
     _invulnerabilityTimer = 0;
     _breachLatched = false;
     _enemyFireTimer = 0;
+    _diveTimer = 0;
     _scoredAliens.clear();
   }
 
@@ -194,6 +217,9 @@ class SpaceInvadersGame extends FlameGame
         _enemyFireTimer -= fireInterval;
         _maybeFireEnemyShot();
       }
+    }
+    if (diveAttackEnabled) {
+      _updateDiveAttacks(dt);
     }
     checkFormationBreach();
     _updateHud();
@@ -295,6 +321,9 @@ class SpaceInvadersGame extends FlameGame
       if (alien.destroyed || alien.isRemoved) {
         continue;
       }
+      if (alien.flightState != AlienFlightState.inFormation) {
+        continue;
+      }
       final column = (alien.position.x / columnWidth).round();
       final current = byColumn[column];
       if (current == null || alien.position.y > current.position.y) {
@@ -332,6 +361,92 @@ class SpaceInvadersGame extends FlameGame
       ),
     );
   }
+
+  // --- Dive attacks ---
+
+  /// Tick the dive scheduler and diver fire cooldowns. Divers fire while
+  /// flying downwards; the shared projectile cap still applies.
+  void _updateDiveAttacks(double dt) {
+    _diveTimer += dt;
+    if (_diveTimer >= GameConfig.diveAttackInterval) {
+      _diveTimer -= GameConfig.diveAttackInterval;
+      tryLaunchDive();
+    }
+    if (isGameOver) {
+      return;
+    }
+    final divers = world
+        .descendants()
+        .whereType<Alien>()
+        .where((alien) => alien.isDiving && !alien.destroyed && !alien.isRemoved)
+        .toList();
+    for (final diver in divers) {
+      diver.diveFireCooldown -= dt;
+      if (diver.diveFireCooldown > 0) {
+        continue;
+      }
+      diver.diveFireCooldown += GameConfig.diveFireInterval;
+      if (world.descendants().whereType<EnemyLaser>().length >=
+          GameConfig.maxEnemyProjectiles) {
+        continue;
+      }
+      world.add(
+        EnemyLaser(
+          position: Vector2(
+            diver.position.x + diver.size.x / 2,
+            diver.position.y + diver.size.y / 2,
+          ),
+          onHitPlayer: onEnemyProjectileHitPlayer,
+        ),
+      );
+    }
+  }
+
+  /// Detach one random formation alien into a dive, if any are eligible
+  /// and the simultaneous-diver cap is not reached. Returns true when
+  /// a dive started.
+  bool tryLaunchDive() {
+    if (!_isPlaying || isGameOver) {
+      return false;
+    }
+    final formation = world.firstChild<AlienFormation>();
+    if (formation == null) {
+      return false;
+    }
+    if (activeDiverCount >= GameConfig.maxSimultaneousDivers) {
+      return false;
+    }
+    final candidates = formation.children
+        .whereType<Alien>()
+        .where(
+          (alien) =>
+              !alien.destroyed &&
+              !alien.isRemoved &&
+              alien.flightState == AlienFlightState.inFormation,
+        )
+        .toList();
+    if (candidates.isEmpty) {
+      return false;
+    }
+    final alien = candidates[random.nextInt(candidates.length)];
+    final homeSlot = alien.position.clone();
+    // The formation sits directly in the world, so the alien's world
+    // top-left is the formation offset plus its local slot.
+    final worldTopLeft = formation.position + homeSlot;
+    alien.removeFromParent();
+    world.add(alien);
+    alien.beginDive(
+      worldTopLeft: worldTopLeft,
+      homeParent: formation,
+      homeSlot: homeSlot,
+      speedMultiplier: formation.speedMultiplier,
+      phase: random.nextDouble() * 2 * pi,
+    );
+    return true;
+  }
+
+  /// Deterministic helper: launch one dive immediately, bypassing timers.
+  bool forceDiveAttack() => tryLaunchDive();
 
   /// Single entry point for enemy-projectile hits; idempotent per projectile
   /// via [EnemyLaser.hasHit] plus the invulnerability window.
@@ -456,16 +571,30 @@ class SpaceInvadersGame extends FlameGame
     score = 0;
     _breachLatched = false;
     _enemyFireTimer = 0;
+    _diveTimer = 0;
     clearInvulnerability();
     for (final projectile
         in world.descendants().whereType<EnemyLaser>().toList()) {
       projectile.removeFromParent();
     }
+    // Despawn stray divers whose formation is going away; the fresh
+    // formation spawns its own roster.
+    for (final diver in world
+        .descendants()
+        .whereType<Alien>()
+        .where(
+          (alien) => alien.flightState != AlienFlightState.inFormation,
+        )
+        .toList()) {
+      diver.removeFromParent();
+    }
     _levelLabel?.text = 'LEVEL 2';
     _alienFormation?.removeFromParent();
     final sprites = _alienSprites;
     if (sprites != null) {
-      world.add(AlienFormation(sprites: sprites, speedMultiplier: 1.5));
+      final formation = AlienFormation(sprites: sprites, speedMultiplier: 1.5);
+      _alienFormation = formation;
+      world.add(formation);
     }
   }
 }

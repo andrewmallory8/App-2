@@ -203,7 +203,7 @@ void main() {
     final alien = game.world.descendants().whereType<Alien>().first;
     final laser = Laser(
       position: alien.absoluteCenter,
-      onAlienDestroyed: () {},
+      onAlienDestroyed: (alien) {},
     );
     game.world.add(laser);
     await tester.runAsync(game.ready);

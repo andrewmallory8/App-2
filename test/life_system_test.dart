@@ -1,3 +1,4 @@
+import 'package:flame/components.dart';
 import 'package:flame/game.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
@@ -38,6 +39,19 @@ Future<void> pumpPlayingGame(
 Future<void> settleRoute(WidgetTester tester, SpaceInvadersGame game) async {
   await tester.runAsync(game.ready);
   await tester.pump();
+  await tester.pump();
+}
+
+Future<void> completeLevelOne(
+  WidgetTester tester,
+  SpaceInvadersGame game,
+) async {
+  final aliens = game.world.descendants().whereType<Alien>().toList();
+  for (final alien in aliens) {
+    game.onAlienDestroyed(alien);
+    alien.removeFromParent();
+  }
+  await tester.runAsync(game.ready);
   await tester.pump();
 }
 
@@ -144,10 +158,7 @@ void main() {
 
     game.spawnEnemyProjectile(Vector2(180, 100));
     await tester.runAsync(game.ready);
-    final projectile = game.world
-        .descendants()
-        .whereType<EnemyLaser>()
-        .first;
+    final projectile = game.world.descendants().whereType<EnemyLaser>().first;
     final startY = projectile.position.y;
     game.update(0.2);
     expect(projectile.position.y, greaterThan(startY));
@@ -255,8 +266,7 @@ void main() {
 
       final formation = game.world.firstChild<AlienFormation>()!;
       // Push the lowest part of the formation onto the danger line.
-      formation.position.y =
-          GameConfig.playerDangerLineY - formation.size.y;
+      formation.position.y = GameConfig.playerDangerLineY - formation.size.y;
       expect(
         formation.position.y + formation.size.y,
         greaterThanOrEqualTo(GameConfig.playerDangerLineY),
@@ -448,9 +458,7 @@ void main() {
     expect(player.isVisible, isTrue);
   });
 
-  testWidgets('death screen halts gameplay updates underneath', (
-    tester,
-  ) async {
+  testWidgets('death screen halts gameplay updates underneath', (tester) async {
     final game = SpaceInvadersGame();
     await pumpPlayingGame(tester, game);
     game.enemyAutoFireEnabled = false;
@@ -469,5 +477,62 @@ void main() {
     expect(game.score, scoreAfterDeath);
     expect(game.world.descendants().whereType<Laser>(), isEmpty);
     expect(game.world.descendants().whereType<EnemyLaser>(), isEmpty);
+  });
+
+  testWidgets('level two starts with reset lives and score', (tester) async {
+    final game = SpaceInvadersGame();
+    await pumpPlayingGame(tester, game);
+    game.enemyAutoFireEnabled = false;
+    game.lives = 1;
+    game.score = 90;
+
+    await completeLevelOne(tester, game);
+
+    expect(game.lives, GameConfig.initialLives);
+    expect(game.score, 0);
+  });
+
+  testWidgets('clearing level one starts the faster level two formation', (
+    tester,
+  ) async {
+    final game = SpaceInvadersGame();
+    await pumpPlayingGame(tester, game);
+    game.enemyAutoFireEnabled = false;
+
+    await completeLevelOne(tester, game);
+
+    final formation = game.world.firstChild<AlienFormation>()!;
+    expect(formation.speedMultiplier, 1.5);
+    expect(game.world.descendants().whereType<Alien>(), hasLength(15));
+    expect(
+      game.world.descendants().whereType<TextComponent>().map(
+        (component) => component.text,
+      ),
+      contains('LEVEL 2'),
+    );
+  });
+
+  testWidgets('level two clears transient combat state', (tester) async {
+    final game = SpaceInvadersGame();
+    await pumpPlayingGame(tester, game);
+    game.enemyAutoFireEnabled = false;
+
+    final formation = game.world.firstChild<AlienFormation>()!;
+    formation.position.y = GameConfig.playerDangerLineY - formation.size.y;
+    game.update(0);
+    game.spawnEnemyProjectile(Vector2(20, 100));
+    await tester.runAsync(game.ready);
+    await tester.pump();
+
+    expect(game.breachLatched, isTrue);
+    expect(game.isInvulnerable, isTrue);
+    expect(game.enemyProjectileCount, 1);
+
+    await completeLevelOne(tester, game);
+
+    expect(game.breachLatched, isFalse);
+    expect(game.isInvulnerable, isFalse);
+    expect(game.player.isInvulnerable, isFalse);
+    expect(game.enemyProjectileCount, 0);
   });
 }

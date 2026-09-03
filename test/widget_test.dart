@@ -201,7 +201,10 @@ void main() {
     final game = SpaceInvadersGame();
     await pumpPlayingGame(tester, game);
     final alien = game.world.descendants().whereType<Alien>().first;
-    final laser = Laser(position: alien.absoluteCenter);
+    final laser = Laser(
+      position: alien.absoluteCenter,
+      onAlienDestroyed: (alien) {},
+    );
     game.world.add(laser);
     await tester.runAsync(game.ready);
 

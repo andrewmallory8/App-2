@@ -1,9 +1,10 @@
 import 'dart:math';
-import 'dart:ui';
+import 'dart:ui' show Color;
 
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
+import 'package:flutter/painting.dart' show FontWeight, TextStyle;
 
 import 'components/alien.dart';
 import 'components/alien_formation.dart';
@@ -40,6 +41,14 @@ class SpaceInvadersGame extends FlameGame
 
   late final RouterComponent router;
   late Player player;
+  int _level = 1;
+  int _aliensDefeated = 0;
+  TextComponent? _levelLabel;
+  AlienFormation? _alienFormation;
+  Map<AlienVariant, Sprite>? _alienSprites;
+
+  static int get _aliensNeededForLevelTwo =>
+      GameConfig.alienColumns * AlienVariant.values.length;
 
   // --- Testable game state ---
   int lives = GameConfig.initialLives;
@@ -106,6 +115,8 @@ class SpaceInvadersGame extends FlameGame
   }
 
   void startGame() {
+    _level = 1;
+    _aliensDefeated = 0;
     _resetSession();
     router.pushReplacementNamed(playRoute);
   }
@@ -125,18 +136,37 @@ class SpaceInvadersGame extends FlameGame
   }
 
   World _buildPlayWorld() {
-    final alienSprites = {
+    _level = 1;
+    final alienSprites = <AlienVariant, Sprite>{
       for (final variant in AlienVariant.values)
         variant: Sprite(images.fromCache(variant.assetName)),
     };
+    _alienSprites = alienSprites;
     player = Player(
       sprite: Sprite(images.fromCache('player.png')),
       onFire: _fireLaser,
     );
+    final levelLabel = TextComponent(
+      text: 'LEVEL $_level',
+      position: Vector2(GameConfig.logicalWidth / 2, 18),
+      anchor: Anchor.topCenter,
+      textRenderer: TextPaint(
+        style: const TextStyle(
+          color: Color(0xFFEAF6FF),
+          fontSize: 16,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 2,
+        ),
+      ),
+    );
+    _levelLabel = levelLabel;
+    final formation = AlienFormation(sprites: alienSprites);
+    _alienFormation = formation;
     final hud = Hud()..updateState(lives: lives, score: score);
     return World(
       children: [
-        AlienFormation(sprites: alienSprites),
+        levelLabel,
+        formation,
         ExtraShip(sprite: Sprite(images.fromCache('extra.png'))),
         player,
         hud,
@@ -208,6 +238,7 @@ class SpaceInvadersGame extends FlameGame
       return;
     }
     score += alien.variant.points;
+    _onAlienDestroyed();
     _updateHud();
   }
 
@@ -363,5 +394,34 @@ class SpaceInvadersGame extends FlameGame
       return;
     }
     world.add(Laser(position: origin, onAlienDestroyed: onAlienDestroyed));
+  }
+
+  void _onAlienDestroyed() {
+    if (_level != 1) {
+      return;
+    }
+    _aliensDefeated++;
+    if (_aliensDefeated >= _aliensNeededForLevelTwo) {
+      _startLevelTwo();
+    }
+  }
+
+  void _startLevelTwo() {
+    _level = 2;
+    lives = GameConfig.initialLives;
+    score = 0;
+    _breachLatched = false;
+    _enemyFireTimer = 0;
+    clearInvulnerability();
+    for (final projectile
+        in world.descendants().whereType<EnemyLaser>().toList()) {
+      projectile.removeFromParent();
+    }
+    _levelLabel?.text = 'LEVEL 2';
+    _alienFormation?.removeFromParent();
+    final sprites = _alienSprites;
+    if (sprites != null) {
+      world.add(AlienFormation(sprites: sprites, speedMultiplier: 1.5));
+    }
   }
 }

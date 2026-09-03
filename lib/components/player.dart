@@ -69,8 +69,7 @@ class Player extends SpriteComponent {
     if (isInvulnerable) {
       _blinkElapsed += dt;
       final phase =
-          (_blinkElapsed / GameConfig.invulnerabilityFlashInterval).floor() %
-          2;
+          (_blinkElapsed / GameConfig.invulnerabilityFlashInterval).floor() % 2;
       isVisible = phase == 0;
     } else {
       isVisible = true;

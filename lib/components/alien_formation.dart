@@ -4,7 +4,10 @@ import '../game_config.dart';
 import 'alien.dart';
 
 class AlienFormation extends PositionComponent {
-  AlienFormation({required Map<AlienVariant, Sprite> sprites})
+  AlienFormation({
+    required Map<AlienVariant, Sprite> sprites,
+    this.speedMultiplier = 1,
+  })
     : super(
         position: Vector2(
           (GameConfig.logicalWidth - GameConfig.alienFormationWidth) / 2,
@@ -32,11 +35,12 @@ class AlienFormation extends PositionComponent {
   }
 
   double _direction = 1;
+  final double speedMultiplier;
 
   @override
   void update(double dt) {
     super.update(dt);
-    position.x += _direction * GameConfig.alienMarchSpeed * dt;
+    position.x += _direction * GameConfig.alienMarchSpeed * speedMultiplier * dt;
 
     final leftEdge = GameConfig.alienHorizontalMargin;
     final rightEdge =

@@ -37,10 +37,24 @@ class AlienFormation extends PositionComponent {
   double _direction = 1;
   final double speedMultiplier;
 
+  int get livingAlienCount =>
+      children.whereType<Alien>().where((alien) => !alien.destroyed).length;
+
+  int get totalAlienCount =>
+      AlienVariant.values.length * GameConfig.alienColumns;
+
   @override
   void update(double dt) {
     super.update(dt);
-    position.x += _direction * GameConfig.alienMarchSpeed * speedMultiplier * dt;
+    final defeatedRatio = 1 - livingAlienCount / totalAlienCount;
+    final rageMultiplier =
+        1 + defeatedRatio * GameConfig.alienRageSpeedBonus;
+    position.x +=
+        _direction *
+        GameConfig.alienMarchSpeed *
+        speedMultiplier *
+        rageMultiplier *
+        dt;
 
     final leftEdge = GameConfig.alienHorizontalMargin;
     final rightEdge =

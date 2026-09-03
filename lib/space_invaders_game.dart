@@ -189,8 +189,9 @@ class SpaceInvadersGame extends FlameGame
     _syncPlayerFlash();
     if (enemyAutoFireEnabled) {
       _enemyFireTimer += dt;
-      if (_enemyFireTimer >= GameConfig.enemyFireInterval) {
-        _enemyFireTimer -= GameConfig.enemyFireInterval;
+      final fireInterval = _currentEnemyFireInterval;
+      if (_enemyFireTimer >= fireInterval) {
+        _enemyFireTimer -= fireInterval;
         _maybeFireEnemyShot();
       }
     }
@@ -244,20 +245,63 @@ class SpaceInvadersGame extends FlameGame
 
   // --- Enemy fire ---
 
+  /// Fire faster as fewer aliens remain, making the end of a wave tense.
+  double get _currentEnemyFireInterval {
+    final formation = world.firstChild<AlienFormation>();
+    if (formation == null || formation.totalAlienCount == 0) {
+      return GameConfig.enemyFireInterval;
+    }
+    final defeatedRatio =
+        1 - formation.livingAlienCount / formation.totalAlienCount;
+    return GameConfig.enemyFireInterval -
+        (GameConfig.enemyFireInterval - GameConfig.enemyMinimumFireInterval) *
+            defeatedRatio;
+  }
+
   void _maybeFireEnemyShot() {
     if (!_isPlaying || isGameOver) {
       return;
     }
-    final aliens = world.descendants().whereType<Alien>().toList();
-    if (aliens.isEmpty) {
+    final attackers = _frontlineAttackers();
+    if (attackers.isEmpty) {
       return;
     }
     if (world.descendants().whereType<EnemyLaser>().length >=
         GameConfig.maxEnemyProjectiles) {
       return;
     }
-    final shooter = aliens[random.nextInt(aliens.length)];
+    attackers.sort(
+      (left, right) => (left.absoluteCenter.x - player.position.x)
+          .abs()
+          .compareTo((right.absoluteCenter.x - player.position.x).abs()),
+    );
+    // Pick one of the three closest exposed aliens. This feels aimed without
+    // making every shot perfectly accurate or unfair.
+    final preferredCount = min(3, attackers.length);
+    final shooter = attackers[random.nextInt(preferredCount)];
     spawnEnemyProjectile(shooter.absoluteCenter.clone());
+  }
+
+  /// Returns only the lowest surviving alien in each column. Enemies behind
+  /// another invader cannot shoot through their own formation.
+  List<Alien> _frontlineAttackers() {
+    final formation = world.firstChild<AlienFormation>();
+    if (formation == null) {
+      return [];
+    }
+    final byColumn = <int, Alien>{};
+    final columnWidth = GameConfig.alienWidth + GameConfig.alienColumnGap;
+    for (final alien in formation.children.whereType<Alien>()) {
+      if (alien.destroyed || alien.isRemoved) {
+        continue;
+      }
+      final column = (alien.position.x / columnWidth).round();
+      final current = byColumn[column];
+      if (current == null || alien.position.y > current.position.y) {
+        byColumn[column] = alien;
+      }
+    }
+    return byColumn.values.toList();
   }
 
   /// Deterministic helper: fire from the first alien, bypassing timers.
@@ -265,15 +309,15 @@ class SpaceInvadersGame extends FlameGame
     if (!_isPlaying || isGameOver) {
       return;
     }
-    final aliens = world.descendants().whereType<Alien>().toList();
-    if (aliens.isEmpty) {
+    final attackers = _frontlineAttackers();
+    if (attackers.isEmpty) {
       return;
     }
     if (world.descendants().whereType<EnemyLaser>().length >=
         GameConfig.maxEnemyProjectiles) {
       return;
     }
-    spawnEnemyProjectile(aliens.first.absoluteCenter.clone());
+    spawnEnemyProjectile(attackers.first.absoluteCenter.clone());
   }
 
   /// Deterministic helper: spawn an enemy projectile at an exact position.
